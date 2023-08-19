@@ -1,0 +1,7 @@
+03:33:26 **** Incremental Build of configuration Debug for project Control_ECU ****
+make all 
+make: *** No rule to make target `Control_ECU_APPL.o', needed by `Control_ECU.elf'.  Stop.
+"make all" terminated with exit code 2. Build might be incomplete.
+
+03:33:26 Build Failed. 1 errors, 0 warnings. (took 230ms)
+

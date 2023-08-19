@@ -1,0 +1,242 @@
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/interrupt.h>
+#include "../MCAL/uart.h"
+#include "../MCAL/twi.h"
+#include "../HAL/external_eeprom.h"
+#include "../MCAL/Timer1.h"
+#include "../HAL/DC_motor.h"
+#define Size   5// size of array
+/*****************************************************************************************
+							    Global variables
+ *****************************************************************************************/
+
+static uint8 step=0;//variable to control the steps
+uint8 TFlag=0;
+uint8 arr_pass[Size];//array to store the password
+uint8 arr_confirm[Size];//array to store the confirm pass
+uint8 arr_eeprom[Size];
+uint8 confirm_eeprom[Size];
+Timer1_ConfigType Timer={65500,0,FCPU_1024,Normal};
+//Timer1_ConfigType Timer1={50535,0,FCPU_1024,Normal};
+
+/*****************************************************************************************
+ 	 	 	 	 	 	 	 	 function prototypes
+ *****************************************************************************************/
+//check the key, fill arr_pass[] array and return 1-the key is valid display '*'  2-the user submit and the number not valid display error  3-the user submit and the pass is valid
+uint8 pass_match();
+uint8 eeprom_match();
+void Motor_End(void);
+void Motor_ACW(void);
+void Motor_stop(void);
+void Motor_CW(void);
+
+/******************************************************************************************
+ 	 	 	 	 	 	 	     End prototypes
+ ******************************************************************************************/
+int main(void)
+{
+	SREG |=(1<<7);
+
+	uint8 i/*for loop parameter*/,match/*to compar two arrays*/;
+
+	UART_ConfigType uart={_8_Bit_Mode,Disabled,_1_Stop_Bit,Rate3};//configuration of uart with 8 bit character size ,1 stop bit ,no parity bit and Baud rate 9600
+
+	Timer1_ConfigType Timer={4800,5000,FCPU_1024,CTC};
+
+	TWI_ConfigType twi;//configuration for twi with address 0x01 and bit rate 400,000 kbps
+	twi.address.address=0x01;//my address is 0x01
+	twi.bit_rate.bit_rate=0x02;//bit rate 400 kbps
+
+	UART_init(&uart);//initialize UART with the address of uart object
+
+	TWI_init(&twi);//initialize twi with the address of twi object
+	DcMotor_Init();
+	while(1)//super loop
+	{//start super loop
+		step=UART_recieveByte();//receive the step from HMI_MCU to keep on track
+		switch(step)//switch step cases
+		{//start switch step
+		////////////////////////case 1/////////////////////////////////////
+		case 1://case step 1
+			for(i=0;i<(Size-1);i++)//loop in arr_pass
+			{//start for arr_pass
+				arr_pass[i]=UART_recieveByte();//fill the arr_pass with the password
+			}//end for arr_pass
+
+			step=0;//do not come to step 1 again
+
+			break;//break case step 1
+			///////////////////////////////////case 2//////////////////////////////////////////
+		case 2://case step 2
+
+			for(i=0;i<(Size-1);i++)//loop in arr_confirm
+			{//start for arr_pass
+				arr_confirm[i]=UART_recieveByte();//fill the arr_confirm with the password
+			}//end for arr_pass
+			match=pass_match();//compare two arrays
+			UART_sendByte(match);//send 0 if two passwords not matched 1 if matched
+
+			if(match==1)//if the two passwords match
+			{//start if match
+
+				EEPROM_writeByte(0x0011,arr_confirm[0]);//write the value of arr_confirm[i] in the address corresponding to address 0x0311
+				_delay_ms(50);
+				EEPROM_writeByte(0x0012,arr_confirm[1]);//write the value of arr_confirm[i] in the address corresponding to address 0x0311
+				_delay_ms(50);
+
+				EEPROM_writeByte(0x0031,arr_confirm[2]);//write the value of arr_confirm[i] in the address corresponding to address 0x0311
+				_delay_ms(50);
+
+				EEPROM_writeByte(0x0041,arr_confirm[3]);//write the value of arr_confirm[i] in the address corresponding to address 0x0311
+				_delay_ms(50);
+
+				EEPROM_writeByte(0x0051,arr_confirm[4]);//write the value of arr_confirm[i] in the address corresponding to address 0x0311
+				_delay_ms(50);
+
+			}//end if match
+			//for to reset two arrays
+			else//if not match
+			{//start if not match
+				step=0;//no step
+			}//end if not match
+
+
+			break;//break case step 2
+			//////////////////////////////////////////////////////////////////////////////////////
+
+		case  3://start case step 3
+
+			for(i=0;i<(Size-1);i++)//loop in arr_confirm
+			{//start for confirm_eeprom
+				confirm_eeprom[i]=UART_recieveByte();//fill the confirm_eeprom with the password
+
+			}//end for confirm_eeprom
+			//////////////////////////////////////////////
+			//////////////////////////////////////////////
+
+			EEPROM_readByte(0x0011,&arr_eeprom[0]);//read the value from address 0x0011  and put it in arr_eeprom[i]
+			_delay_ms(50);
+
+			EEPROM_readByte(0x0012,&(arr_eeprom[1]));//read the value from address 0x0012  and put it in arr_eeprom[i]
+			_delay_ms(50);
+
+			EEPROM_readByte(0x0031,&(arr_eeprom[2]));//read the value from address 0x0031  and put it in arr_eeprom[i]
+			_delay_ms(50);
+
+			EEPROM_readByte(0x0041,&(arr_eeprom[3]));//read the value from address 0x0041  and put it in arr_eeprom[i]
+			_delay_ms(50);
+
+			EEPROM_readByte(0x0051,&(arr_eeprom[4]));//read the value from address 0x0051  and put it in arr_eeprom[i]
+			_delay_ms(50);
+
+			//////////////////////////////////////////////////////////////////////////
+			////////////////////////////////////////////////////////////////////////
+
+			match=eeprom_match();//compare between two arrays
+			UART_sendByte(match);//send the result of compare to HMI_MCU
+			step=UART_recieveByte();//now what??
+			if(step==4)
+			{
+				Time1_SetCallBack(Motor_CW);
+				Timer1_Init(&Timer);
+				DcMotor_Rotate(CW,255);
+				UART_sendByte(1);
+			}
+
+			break;///////////////end of case step 3
+
+			/////////////////////////////////////////////////////
+			//////////////////////////////////////////////////////
+		case 4://///////////////////start of case step 4
+
+
+			break;////////////////////end of case step 4
+			///////////////////////////////////////////////////
+			//////////////////////////////////////////////////
+
+		}//end switch step cases
+
+	}//end super loop
+}//end main
+
+
+/****************************************************************************
+ *                          Function Body
+ *****************************************************************************/
+uint8 pass_match()//fuction to check if the to passwords are match or not
+{//start pass_match func
+	uint8 i/*for loop parameter*/,ret;
+	for(i=0;i<(Size-1);i++)//loop in both arr_pass and arr_confirm
+	{//start for loop
+		if(arr_pass[i] == arr_confirm[i])//if not match
+		{//start if not match
+			ret= 1;//return false
+		}//end if not match
+		else{
+			ret=0;
+			break;
+		}
+	}//end for loop
+	return ret;//return true if matched
+}//end pass_match func
+
+
+uint8 eeprom_match()
+{
+	uint8 i/*for loop parameter*/,ret;
+	for(i=0;i<(Size-1);i++)//loop in both arr_pass and arr_confirm
+	{//start for loop
+		if(arr_eeprom[i] == confirm_eeprom[i])//if not match
+		{//start if not match
+			ret= 1;//return false
+		}//end if not match
+		else{
+			ret=0;
+			break;
+		}
+	}//end for loop
+	return ret;//return true if matched
+}//end pass_match func
+
+void Motor_End(void)
+{
+	Timer1_DeInit();
+	DcMotor_Rotate(OFF,0);
+	UART_sendByte(4);
+}
+
+
+void Motor_ACW(void)
+{
+	TFlag++;
+	if(TFlag==1)
+	{
+		DcMotor_Rotate(A_CW,255);
+		UART_sendByte(3);
+		Time1_SetCallBack(Motor_End);
+		TFlag=0;
+
+	}}
+void Motor_stop(void)
+{
+	TFlag++;
+	if(TFlag==1)
+	{
+		DcMotor_Rotate(OFF,0);
+		UART_sendByte(2);
+		Time1_SetCallBack(Motor_ACW);
+		TFlag=0;
+
+	}}
+void Motor_CW(void)
+{
+	TFlag++;
+	if(TFlag==1)
+	{
+		DcMotor_Rotate(CW,255);
+		UART_sendByte(1);
+		Time1_SetCallBack(Motor_stop);
+		TFlag=0;
+	}}
+
